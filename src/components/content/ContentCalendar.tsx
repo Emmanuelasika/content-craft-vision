@@ -1,9 +1,10 @@
-
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useContent } from '@/hooks/useContent';
 import { CategoryList } from './CategoryList';
 import { CalendarHeader } from './CalendarHeader';
+import { toast } from 'sonner';
+import { useEffect, useState } from 'react';
 
 export function ContentCalendar() {
   const { 
@@ -17,8 +18,36 @@ export function ContentCalendar() {
     editTopic,
     toggleTopicCompletion,
     removeTopic,
-    moveTopic
+    moveTopic,
+    refresh
   } = useContent();
+
+  const [uniqueCategories, setUniqueCategories] = useState(categories);
+
+  useEffect(() => {
+    if (categories.length > 0) {
+      const generalCategories = categories.filter(cat => cat.name === "General");
+      
+      if (generalCategories.length > 1) {
+        const toKeep = generalCategories[0];
+        const toRemove = generalCategories.slice(1);
+        
+        const removePromises = toRemove.map(cat => removeCategory(cat.id));
+        
+        Promise.all(removePromises)
+          .then(() => {
+            refresh();
+            toast.success("Removed duplicate General categories");
+          })
+          .catch(err => {
+            console.error("Failed to remove duplicates:", err);
+            toast.error("Failed to remove duplicate categories");
+          });
+      } else {
+        setUniqueCategories(categories);
+      }
+    }
+  }, [categories.length]);
 
   const handleAddCategory = async (name: string) => {
     await addCategory(name);
@@ -56,8 +85,8 @@ export function ContentCalendar() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center space-y-4">
-          <div className="w-16 h-16 border-4 border-primary/30 border-t-primary rounded-full animate-spin mx-auto"></div>
-          <p className="text-xl font-medium">Loading your content...</p>
+          <div className="w-16 h-16 border-4 border-purple-300 border-t-purple-600 rounded-full animate-spin mx-auto"></div>
+          <p className="text-xl font-medium bg-gradient-to-r from-violet-500 to-purple-600 bg-clip-text text-transparent">Loading your content...</p>
         </div>
       </div>
     );
@@ -65,21 +94,24 @@ export function ContentCalendar() {
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className="container max-w-5xl mx-auto px-4 py-6">
+      <div className="container max-w-7xl mx-auto px-4 py-6">
         <CalendarHeader onAddCategory={handleAddCategory} />
         
         {categories.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <p className="text-xl font-medium mb-4">No categories yet</p>
+          <div className="flex flex-col items-center justify-center py-16 my-8 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-950/20 dark:to-violet-950/10 rounded-xl border border-purple-100 dark:border-purple-900/30">
+            <div className="h-16 w-16 rounded-full bg-gradient-to-br from-purple-400 to-violet-500 flex items-center justify-center text-white mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-layout-list"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 4h7"/><path d="M14 9h7"/><path d="M14 15h7"/><path d="M14 20h7"/></svg>
+            </div>
+            <p className="text-xl font-medium bg-gradient-to-r from-violet-500 to-purple-600 bg-clip-text text-transparent mb-4">Start organizing your content</p>
             <button
               onClick={() => handleAddCategory('General')}
-              className="text-primary hover:underline"
+              className="px-4 py-2 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-full font-medium hover:opacity-90 transition-opacity"
             >
               Create your first category
             </button>
           </div>
         ) : (
-          <div className="mt-6 space-y-6">
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {categories.map((category) => (
               <CategoryList
                 key={category.id}
