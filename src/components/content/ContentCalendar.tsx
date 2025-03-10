@@ -1,8 +1,9 @@
+
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useContent } from '@/hooks/useContent';
 import { CategoryList } from './CategoryList';
-import { CalendarHeader } from './CalendarHeader';
+import { CalendarHeader, ViewMode, SortOption } from './CalendarHeader';
 import { toast } from 'sonner';
 import { useEffect, useState } from 'react';
 
@@ -19,9 +20,12 @@ export function ContentCalendar() {
     toggleTopicCompletion,
     removeTopic,
     moveTopic,
-    refresh
+    refresh,
+    reorderCategories
   } = useContent();
 
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [sortOption, setSortOption] = useState<SortOption>('dateAdded');
   const [uniqueCategories, setUniqueCategories] = useState(categories);
 
   useEffect(() => {
@@ -81,6 +85,33 @@ export function ContentCalendar() {
     await moveTopic(id, targetCategoryId, order);
   };
 
+  const handleReorderCategories = async (categoryId: string, newOrder: number) => {
+    const reorderedIds = [...categories].sort((a, b) => a.order - b.order);
+    
+    // Remove the category from its current position
+    const targetCategory = reorderedIds.find(c => c.id === categoryId);
+    if (!targetCategory) return;
+    
+    const oldIndex = reorderedIds.indexOf(targetCategory);
+    reorderedIds.splice(oldIndex, 1);
+    
+    // Insert at new position
+    reorderedIds.splice(newOrder, 0, targetCategory);
+    
+    // Update the order
+    const categoryIdsInOrder = reorderedIds.map(c => c.id);
+    await reorderCategories(categoryIdsInOrder);
+  };
+
+  // Sort topics based on selected option
+  const getSortedTopics = () => {
+    if (sortOption === 'alphabetical') {
+      return [...topics].sort((a, b) => a.title.localeCompare(b.title));
+    }
+    // Default is by date added (using order field)
+    return topics;
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -95,7 +126,13 @@ export function ContentCalendar() {
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="container max-w-7xl mx-auto px-4 py-6">
-        <CalendarHeader onAddCategory={handleAddCategory} />
+        <CalendarHeader 
+          onAddCategory={handleAddCategory} 
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          sortOption={sortOption}
+          onSortOptionChange={setSortOption}
+        />
         
         {categories.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 my-8 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-950/20 dark:to-violet-950/10 rounded-xl border border-purple-100 dark:border-purple-900/30">
@@ -111,12 +148,15 @@ export function ContentCalendar() {
             </button>
           </div>
         ) : (
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {categories.map((category) => (
+          <div className={viewMode === 'grid' 
+            ? "mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" 
+            : "mt-6 space-y-6"
+          }>
+            {categories.map((category, index) => (
               <CategoryList
                 key={category.id}
                 category={category}
-                topics={topics}
+                topics={getSortedTopics()}
                 allCategories={categories}
                 onAddTopic={handleAddTopic}
                 onEditTopic={handleEditTopic}
@@ -125,6 +165,9 @@ export function ContentCalendar() {
                 onMoveTopic={handleMoveTopic}
                 onEditCategory={handleEditCategory}
                 onDeleteCategory={handleDeleteCategory}
+                onReorderCategory={handleReorderCategories}
+                viewMode={viewMode}
+                index={index}
               />
             ))}
           </div>

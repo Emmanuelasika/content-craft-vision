@@ -1,15 +1,17 @@
 
-import { useState } from 'react';
-import { useDrop } from 'react-dnd';
+import { useState, useRef } from 'react';
+import { useDrop, useDrag } from 'react-dnd';
 import { Category, Topic } from '@/lib/supabase';
 import { ItemTypes } from '@/lib/dnd';
 import { TopicItem } from './TopicItem';
 import { Button } from '@/components/ui/button';
-import { Plus, MoreHorizontal, Edit, Trash, ListChecks } from 'lucide-react';
+import { Plus, MoreHorizontal, Edit, Trash, ListChecks, GripVertical } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DeleteConfirmDialog } from '../dialogs/DeleteConfirmDialog';
 import { CategoryDialog } from '../dialogs/CategoryDialog';
 import { TopicDialog } from '../dialogs/TopicDialog';
+import { cn } from '@/lib/utils';
+import { ViewMode } from './CalendarHeader';
 
 interface CategoryListProps {
   category: Category;
@@ -22,6 +24,9 @@ interface CategoryListProps {
   onMoveTopic: (id: string, targetCategoryId: string, order: number) => Promise<void>;
   onEditCategory: (id: string, name: string) => Promise<void>;
   onDeleteCategory: (id: string) => Promise<void>;
+  onReorderCategory: (id: string, newOrder: number) => Promise<void>;
+  viewMode: ViewMode;
+  index: number;
 }
 
 // Function to get a color based on category name
@@ -51,12 +56,16 @@ export function CategoryList({
   onMoveTopic,
   onEditCategory,
   onDeleteCategory,
+  onReorderCategory,
+  viewMode,
+  index
 }: CategoryListProps) {
   const [isAddTopicOpen, setIsAddTopicOpen] = useState(false);
   const [isEditCategoryOpen, setIsEditCategoryOpen] = useState(false);
   const [isDeleteCategoryOpen, setIsDeleteCategoryOpen] = useState(false);
   const [editingTopic, setEditingTopic] = useState<Topic | null>(null);
   const [deletingTopic, setDeletingTopic] = useState<Topic | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
 
   const filteredTopics = topics
     .filter(topic => topic.category_id === category.id)
@@ -68,24 +77,74 @@ export function CategoryList({
       return a.order - b.order;
     });
 
+  // Set up drag for category reordering
+  const [{ isDragging }, drag, preview] = useDrag({
+    type: ItemTypes.CATEGORY,
+    item: { 
+      id: category.id, 
+      type: ItemTypes.CATEGORY,
+      originalIndex: index
+    },
+    collect: (monitor) => ({
+      isDragging: monitor.isDragging(),
+    }),
+    canDrag: () => true,
+  });
+
+  // Set up drop for category reordering
   const [{ isOver }, drop] = useDrop({
-    accept: ItemTypes.TOPIC,
-    drop: (item: { id: string; type: string }, monitor) => {
-      // If dropped directly on the category (not on a specific topic)
-      if (monitor.didDrop()) {
+    accept: [ItemTypes.TOPIC, ItemTypes.CATEGORY],
+    hover: (item: any, monitor) => {
+      if (!ref.current) return;
+      
+      // Handle category reordering
+      if (item.type === ItemTypes.CATEGORY && item.id !== category.id) {
+        const hoverIndex = index;
+        const dragIndex = item.originalIndex;
+        
+        // Determine rectangle on screen
+        const hoverBoundingRect = ref.current.getBoundingClientRect();
+        
+        // Get horizontal middle
+        const hoverMiddleX = (hoverBoundingRect.right - hoverBoundingRect.left) / 2;
+        
+        // Determine mouse position
+        const clientOffset = monitor.getClientOffset();
+        
+        // Get pixels to the left
+        const hoverClientX = clientOffset!.x - hoverBoundingRect.left;
+        
+        // Only perform the move when the mouse has crossed half of the items width
+        if (dragIndex < hoverIndex && hoverClientX < hoverMiddleX) return;
+        if (dragIndex > hoverIndex && hoverClientX > hoverMiddleX) return;
+        
+        item.originalIndex = hoverIndex;
+      }
+    },
+    drop: (item: any, monitor) => {
+      // If it's already handled by a nested drop target
+      if (monitor.didDrop()) return;
+      
+      if (item.type === ItemTypes.CATEGORY) {
+        onReorderCategory(item.id, index);
         return;
       }
       
-      // Add to the end of this category
-      return {
-        categoryId: category.id,
-        index: filteredTopics.length
-      };
+      // For topic drops
+      if (item.type === ItemTypes.TOPIC) {
+        return {
+          categoryId: category.id,
+          index: filteredTopics.length
+        };
+      }
     },
     collect: (monitor) => ({
       isOver: !!monitor.isOver({ shallow: true })
     })
   });
+
+  // Initialize the drag-drop refs
+  drag(drop(ref));
 
   const handleAddTopic = async (title: string, categoryId: string) => {
     await onAddTopic(categoryId, title);
@@ -122,13 +181,27 @@ export function CategoryList({
 
   return (
     <div 
-      className={`rounded-xl border bg-card shadow-sm transition-all duration-200 hover:shadow-md overflow-hidden ${isOver ? 'ring-2 ring-purple-400 ring-opacity-60' : ''}`} 
-      ref={drop}
+      ref={preview}
+      className={cn(
+        'rounded-xl border bg-card shadow-sm transition-all duration-200 hover:shadow-md overflow-hidden',
+        isOver ? 'ring-2 ring-purple-400 ring-opacity-60' : '',
+        isDragging ? 'opacity-60 cursor-grabbing' : '',
+        viewMode === 'list' ? 'max-w-none' : 'h-full'
+      )} 
+      style={{ opacity: isDragging ? 0.6 : 1 }}
     >
       {/* Category Header with Gradient */}
       <div className={`bg-gradient-to-r ${categoryGradient} px-4 py-3 text-white`}>
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-lg tracking-tight">{category.name}</h3>
+          <div className="flex items-center">
+            <div 
+              ref={ref} 
+              className="cursor-grab p-1 mr-2"
+            >
+              <GripVertical className="h-4 w-4 text-white/80" />
+            </div>
+            <h3 className="font-semibold text-lg tracking-tight">{category.name}</h3>
+          </div>
           
           <div className="flex space-x-1">
             <Button
@@ -185,8 +258,11 @@ export function CategoryList({
       {/* Topics List */}
       <div className="p-4">
         {filteredTopics.length > 0 ? (
-          <div className="space-y-2">
-            {filteredTopics.map((topic, index) => (
+          <div className={cn(
+            "space-y-2",
+            viewMode === 'grid' && "grid grid-cols-1 gap-2"
+          )}>
+            {filteredTopics.map((topic, topicIndex) => (
               <TopicItem
                 key={topic.id}
                 topic={topic}
@@ -195,7 +271,8 @@ export function CategoryList({
                 onDelete={setDeletingTopic}
                 onMove={onMoveTopic}
                 categoryId={category.id}
-                index={index}
+                index={topicIndex}
+                viewMode={viewMode}
               />
             ))}
           </div>

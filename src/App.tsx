@@ -8,6 +8,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { ThemeProvider } from 'next-themes';
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
+import DashboardPage from "./pages/DashboardPage";
 
 const queryClient = new QueryClient();
 
@@ -21,6 +22,7 @@ const App = () => (
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Index />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
