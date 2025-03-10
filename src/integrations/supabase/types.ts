@@ -9,13 +9,85 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      categories: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          order: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          order?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          order?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
+      topics: {
+        Row: {
+          category_id: string
+          completed: boolean
+          created_at: string
+          id: string
+          order: number
+          title: string
+          user_id: string
+        }
+        Insert: {
+          category_id: string
+          completed?: boolean
+          created_at?: string
+          id?: string
+          order?: number
+          title: string
+          user_id: string
+        }
+        Update: {
+          category_id?: string
+          completed?: boolean
+          created_at?: string
+          id?: string
+          order?: number
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "topics_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      update_categories_order: {
+        Args: {
+          categories_data: Json[]
+        }
+        Returns: undefined
+      }
+      update_topics_order: {
+        Args: {
+          topics_data: Json[]
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
