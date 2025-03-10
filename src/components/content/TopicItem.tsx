@@ -26,6 +26,10 @@ interface DragItem {
   originalCategoryId: string;
 }
 
+interface DropResult {
+  isOver: boolean;
+}
+
 export function TopicItem({
   topic,
   onToggleComplete,
@@ -61,7 +65,7 @@ export function TopicItem({
     },
   });
 
-  const [{ isOver }, drop] = useDrop<DragItem>({
+  const [{ isOver }, drop] = useDrop<DragItem, void, DropResult>({
     accept: ItemTypes.TOPIC,
     hover: (draggedItem, monitor) => {
       if (!ref.current) return;
