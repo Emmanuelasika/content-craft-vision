@@ -2,8 +2,17 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = "https://lgfgyiraesalyhfwluej.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxnZmd5aXJhZXNhbHloZndsdWVqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE1ODM5NDYsImV4cCI6MjA1NzE1OTk0Nn0._gII5JYMNd-MdA2QgYMhdl83bcIrjGiNS_8LZfvRa-w";
+// Environment variable checks
+if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+  console.error(
+    'Supabase URL or Anonymous Key is missing. ' +
+    'Please make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your .env.local file. ' +
+    'Refer to .env.example for the required environment variables.'
+  );
+}
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
