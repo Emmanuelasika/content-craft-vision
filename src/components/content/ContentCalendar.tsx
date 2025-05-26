@@ -5,7 +5,7 @@ import { useContent } from '@/hooks/useContent';
 import { CategoryList } from './CategoryList';
 import { CalendarHeader, ViewMode, SortOption } from './CalendarHeader';
 import { toast } from 'sonner';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 
 export function ContentCalendar() {
   const { 
@@ -26,32 +26,6 @@ export function ContentCalendar() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [sortOption, setSortOption] = useState<SortOption>('dateAdded');
-  const [uniqueCategories, setUniqueCategories] = useState(categories);
-
-  useEffect(() => {
-    if (categories.length > 0) {
-      const generalCategories = categories.filter(cat => cat.name === "General");
-      
-      if (generalCategories.length > 1) {
-        const toKeep = generalCategories[0];
-        const toRemove = generalCategories.slice(1);
-        
-        const removePromises = toRemove.map(cat => removeCategory(cat.id));
-        
-        Promise.all(removePromises)
-          .then(() => {
-            refresh();
-            toast.success("Removed duplicate General categories");
-          })
-          .catch(err => {
-            console.error("Failed to remove duplicates:", err);
-            toast.error("Failed to remove duplicate categories");
-          });
-      } else {
-        setUniqueCategories(categories);
-      }
-    }
-  }, [categories.length]);
 
   const handleAddCategory = async (name: string) => {
     await addCategory(name);
@@ -104,13 +78,14 @@ export function ContentCalendar() {
   };
 
   // Sort topics based on selected option
-  const getSortedTopics = () => {
+  const sortedTopics = useMemo(() => {
     if (sortOption === 'alphabetical') {
       return [...topics].sort((a, b) => a.title.localeCompare(b.title));
     }
-    // Default is by date added (using order field)
-    return topics;
-  };
+    // Default is by date added (using order field, which is maintained by other functions)
+    // Or if sortOption === 'dateAdded' (explicitly)
+    return topics; // Assuming topics are already generally in order or will be sorted by category logic
+  }, [topics, sortOption]);
 
   if (isLoading) {
     return (
@@ -156,7 +131,7 @@ export function ContentCalendar() {
               <CategoryList
                 key={category.id}
                 category={category}
-                topics={getSortedTopics()}
+                topics={sortedTopics}
                 allCategories={categories}
                 onAddTopic={handleAddTopic}
                 onEditTopic={handleEditTopic}

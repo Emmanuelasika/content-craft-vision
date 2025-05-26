@@ -50,17 +50,65 @@ export const useContent = () => {
       
       // Ensure there's a General category
       if (fetchedCategories.length === 0 || !fetchedCategories.some(cat => cat.name === 'General')) {
-        const { data, error } = await createCategory(
+        let generalOrder = 0;
+        const updatesForExistingCategories: { id: string, order: number }[] = [];
+
+        if (fetchedCategories.length > 0) {
+          // Check if order 0 is taken by another category
+          const categoryAtOrderZero = fetchedCategories.find(cat => cat.order === 0);
+          if (categoryAtOrderZero) {
+            // If order 0 is taken, shift other categories
+            fetchedCategories.sort((a,b) => a.order - b.order); // Ensure correct order before shifting
+            
+            let currentOrderToAssign = 1; // Start assigning from 1 for existing categories
+            for (const cat of fetchedCategories) {
+              if (cat.order < currentOrderToAssign) { 
+                // This category is before the new "General" or its new position
+                // and its order doesn't need to change relative to "General" being 0.
+                // However, if we are re-assigning all orders to be sequential:
+                 if (cat.order !== currentOrderToAssign -1 && cat.order !==0) { // if cat.order was not 0
+                    // This case is tricky: if categories are like 0, 2, 3 and General becomes 0.
+                    // The original 0 becomes 1, 2 becomes 2, 3 becomes 3.
+                    // Let's simplify: shift all existing categories by 1 if 0 is taken.
+                 }
+              }
+              // This simplified logic shifts all existing categories one position down
+              // if the 'General' category is to be inserted at order 0.
+            }
+
+            // Shift all existing categories to make space for "General" at order 0
+            fetchedCategories.forEach(cat => {
+              updatesForExistingCategories.push({ id: cat.id, order: cat.order + 1 });
+            });
+          }
+          // If order 0 is not taken, generalOrder remains 0, and no shifts are needed yet.
+        }
+        
+        // Create the "General" category with the determined order
+        const { data: generalData, error: generalError } = await createCategory(
           user.id, 
           'General', 
-          fetchedCategories.length
+          generalOrder 
         );
         
-        if (error) throw error;
-        if (data) fetchedCategories.push(data[0]);
+        if (generalError) throw generalError;
+        if (generalData && generalData[0]) {
+          fetchedCategories.push(generalData[0]);
+
+          // If other categories were shifted, update them in the database
+          if (updatesForExistingCategories.length > 0) {
+            await updateCategoriesOrder(updatesForExistingCategories);
+            // Update local state for these categories as well
+            fetchedCategories = fetchedCategories.map(cat => {
+              const update = updatesForExistingCategories.find(u => u.id === cat.id);
+              return update ? { ...cat, order: update.order } : cat;
+            }).filter(cat => cat.id !== generalData[0].id); // remove the one we pushed, it will be added back
+            fetchedCategories.push(generalData[0]); // Add the newly created General category
+          }
+        }
       }
       
-      // Sort categories by order
+      // Sort categories by order to ensure consistency before setting state
       const sortedCategories = [...fetchedCategories].sort((a, b) => a.order - b.order);
       setCategories(sortedCategories);
       setTopics(topicsResponse.data || []);
@@ -74,6 +122,15 @@ export const useContent = () => {
 
   const addCategory = async (name: string) => {
     if (!user) return null;
+
+    // Check for duplicate "General" category
+    if (name === 'General') {
+      const existingGeneralCategory = categories.find(cat => cat.name === 'General');
+      if (existingGeneralCategory) {
+        toast.info("A 'General' category already exists.");
+        return null;
+      }
+    }
     
     try {
       const { data, error } = await createCategory(user.id, name, categories.length);
@@ -118,6 +175,7 @@ export const useContent = () => {
       const generalCategory = categories.find(cat => cat.name === 'General');
       
       if (!generalCategory) {
+        console.error("Critical: General category not found during category deletion process.");
         toast.error('Cannot delete category: General category not found');
         return false;
       }
@@ -212,8 +270,10 @@ export const useContent = () => {
       const topic = topics.find(t => t.id === id);
       if (!topic) return false;
       
+      // 1. Update the topic's completed status
       const newCompletedStatus = !topic.completed;
       
+      // Update in DB
       const { data, error } = await updateTopic(id, { 
         completed: newCompletedStatus 
       });
@@ -221,42 +281,49 @@ export const useContent = () => {
       if (error) throw error;
       
       if (data && data[0]) {
-        // Update state with the completed status
-        const updatedTopics = topics.map(t => 
+        // 2. Update local state with the new completed status immediately
+        let updatedTopics = topics.map(t => 
           t.id === id ? { ...t, completed: newCompletedStatus } : t
         );
         
-        // If completed, move to top of category
+        // 3. If the topic is marked as completed, re-sort topics within its category
         if (newCompletedStatus) {
+          // Get all topics belonging to the same category as the current topic
           const categoryTopics = updatedTopics.filter(t => t.category_id === topic.category_id);
+          // Get all topics not belonging to this category (to be preserved)
           const otherCategoryTopics = updatedTopics.filter(t => t.category_id !== topic.category_id);
           
-          // Sort completed to top, then by original order
+          // 3a. Sort completed topics to the top, then by their original order.
+          // This maintains a stable sort for incomplete items and newly completed items.
           const sortedCategoryTopics = categoryTopics.sort((a, b) => {
-            if (a.completed && !b.completed) return -1;
-            if (!a.completed && b.completed) return 1;
-            return a.order - b.order;
+            if (a.completed && !b.completed) return -1; // a (completed) comes before b (incomplete)
+            if (!a.completed && b.completed) return 1;  // b (completed) comes before a (incomplete)
+            return a.order - b.order; // Otherwise, maintain original order
           });
           
-          // Reassign orders
-          const topicsToUpdate = sortedCategoryTopics.map((t, index) => ({
+          // 3b. Re-assign orders based on the new sort for database update
+          const topicsToUpdateInDb = sortedCategoryTopics.map((t, index) => ({
             id: t.id,
-            order: index
+            order: index // New order within the category
           }));
           
-          // Update database with new orders
-          await updateTopicsOrder(topicsToUpdate);
+          // 3c. Update database with new orders for the affected topics
+          if (topicsToUpdateInDb.length > 0) {
+            await updateTopicsOrder(topicsToUpdateInDb);
+          }
           
-          // Update state with new orders
-          const finalTopics = [
-            ...sortedCategoryTopics.map((t, index) => ({ ...t, order: index })),
+          // 3d. Update local state: merge sorted category topics with other topics.
+          // Also, ensure their 'order' property reflects the new sorting for consistency in the local state.
+          updatedTopics = [
+            ...sortedCategoryTopics.map((t, index) => ({ ...t, order: index })), // Apply new order to state
             ...otherCategoryTopics
           ];
-          
-          setTopics(finalTopics);
-        } else {
-          setTopics(updatedTopics);
         }
+        // If a topic is marked incomplete, its order doesn't change relative to others in this step,
+        // but its completed status is updated. Future sorts (e.g. view mode changes) will place it accordingly.
+
+        // 4. Update the main topics state with all changes
+        setTopics(updatedTopics);
         
         toast.success(newCompletedStatus ? 'Topic marked as completed' : 'Topic marked as active');
         return true;
@@ -332,67 +399,88 @@ export const useContent = () => {
       if (error) throw error;
       
       if (data && data[0]) {
-        // First update the moved topic in state
-        const updatedTopics = topics.map(t => 
+        // 1. The `updateTopic` call already updated the moved topic's category_id and order in the database.
+        //    Reflect this change immediately in the local state for the moved topic.
+        let currentTopics = topics.map(t => 
           t.id === topicId 
             ? { ...t, category_id: targetCategoryId, order: newOrder } 
             : t
         );
-        
-        // Now shift other topics in both source and target categories
-        const sourceTopics = updatedTopics
-          .filter(t => t.category_id === topic.category_id && t.id !== topicId)
-          .sort((a, b) => a.order - b.order);
-          
-        const targetTopics = updatedTopics
-          .filter(t => t.category_id === targetCategoryId && t.id !== topicId)
-          .sort((a, b) => a.order - b.order);
-        
-        // Update orders for source category
-        const updatedSourceTopics = sourceTopics.map((t, index) => ({
-          ...t,
-          order: index
-        }));
-        
-        // Update orders for target category, accounting for the inserted item
-        const updatedTargetTopics = [];
-        for (let i = 0; i < targetTopics.length; i++) {
-          if (i < newOrder) {
-            updatedTargetTopics.push({ ...targetTopics[i], order: i });
-          } else {
-            updatedTargetTopics.push({ ...targetTopics[i], order: i + 1 });
-          }
+
+        // Prepare a list of topics whose orders need to be updated in the database.
+        // Start with the moved topic itself, as its `category_id` also changed.
+        const dbUpdates = [{ id: topicId, order: newOrder, category_id: targetCategoryId }];
+
+        // 2. Re-calculate and update orders for topics in the SOURCE category.
+        //    This is only necessary if the topic moved to a *different* category.
+        if (topic.category_id !== targetCategoryId) {
+          const sourceCategoryTopics = currentTopics
+            .filter(t => t.category_id === topic.category_id && t.id !== topicId) // Exclude the moved topic
+            .sort((a, b) => a.order - b.order); // Sort by current order to correctly re-index
+
+          sourceCategoryTopics.forEach((t, index) => {
+            // If the topic's current order in the sorted list is different from its stored order, it needs an update.
+            if (t.order !== index) { 
+              currentTopics = currentTopics.map(ct => ct.id === t.id ? { ...ct, order: index } : ct);
+              dbUpdates.push({ id: t.id, order: index, category_id: t.category_id });
+            }
+          });
         }
-        
-        // Combine all topics with updated orders
-        const finalTopics = updatedTopics.map(t => {
-          if (t.id === topicId) {
-            return { ...t, order: newOrder };
+
+        // 3. Re-calculate and update orders for topics in the TARGET category.
+        //    Get all topics currently in the target category, excluding the (just moved) topic.
+        let targetCategoryTopics = currentTopics
+          .filter(t => t.category_id === targetCategoryId && t.id !== topicId)
+          .sort((a, b) => a.order - b.order); // Sort them by their current order.
+
+        // Insert the moved topic into this sorted list at its `newOrder` position.
+        // This creates a conceptual snapshot of how the target category should look.
+        const movedTopicInTarget = currentTopics.find(t => t.id === topicId)!;
+        targetCategoryTopics.splice(newOrder, 0, movedTopicInTarget);
+
+        // Now, iterate through this conceptual list and update orders in `currentTopics` and `dbUpdates`.
+        targetCategoryTopics.forEach((t, index) => {
+          // If a topic's order in this conceptual list is different from its stored order, it needs an update.
+          if (t.order !== index) {
+            currentTopics = currentTopics.map(ct => ct.id === t.id ? { ...ct, order: index } : ct);
+            // Check if this topic is already in dbUpdates to avoid duplicates (e.g., the moved topic itself)
+            const existingUpdate = dbUpdates.find(upd => upd.id === t.id);
+            if (existingUpdate) {
+              existingUpdate.order = index; // Update existing entry
+            } else {
+              dbUpdates.push({ id: t.id, order: index, category_id: t.category_id });
+            }
           }
-          
-          if (t.category_id === topic.category_id && t.id !== topicId) {
-            const newTopic = updatedSourceTopics.find(st => st.id === t.id);
-            return newTopic || t;
-          }
-          
-          if (t.category_id === targetCategoryId && t.id !== topicId) {
-            const newTopic = updatedTargetTopics.find(tt => tt.id === t.id);
-            return newTopic || t;
-          }
-          
-          return t;
         });
         
-        // Update database with new orders
-        const topicsToUpdate = [
-          { id: topicId, order: newOrder, category_id: targetCategoryId },
-          ...updatedSourceTopics.map(t => ({ id: t.id, order: t.order })),
-          ...updatedTargetTopics.map(t => ({ id: t.id, order: t.order }))
-        ];
+        // 4. Update database with all necessary order changes.
+        //    Filter out updates where the new order is the same as the old one AND category_id is the same.
+        //    This avoids redundant database operations.
+        const filteredDbUpdates = dbUpdates.filter(update => {
+            const originalTopic = topics.find(t => t.id === update.id);
+            if (!originalTopic) return true; // Should not happen if logic is correct
+            return originalTopic.order !== update.order || (update.category_id && originalTopic.category_id !== update.category_id);
+        });
+
+        if (filteredDbUpdates.length > 0) {
+            await updateTopicsOrder(filteredDbUpdates);
+        }
         
-        await updateTopicsOrder(topicsToUpdate);
-        
-        setTopics(finalTopics);
+        // 5. Update local state with all changes.
+        //    The `currentTopics` array now has all topics with their correct orders and category_ids.
+        //    Sort the entire `currentTopics` array for display: first by category order (if applicable, not done here),
+        //    then by topic order within each category. This ensures the UI reflects the new state accurately.
+        setTopics(
+          currentTopics.sort((a, b) => {
+            if (a.category_id === b.category_id) {
+              return a.order - b.order;
+            }
+            // Optional: A secondary sort for categories themselves, if they are not already ordered.
+            // For now, topics are grouped by category_id, and then ordered within that group.
+            // This relies on categories being inherently ordered or sorted elsewhere if cross-category display order matters.
+            return (categories.find(c => c.id === a.category_id)?.order ?? 0) - (categories.find(c => c.id === b.category_id)?.order ?? 0);
+          })
+        );
         toast.success('Topic moved');
         return true;
       }
